@@ -68,6 +68,7 @@ pub fn handle_request_withdraw(ctx: Context<RequestWithdraw>, amount: u64) -> Re
         amount,
         principal: user.principal,
         pending_withdrawals: pool.pending_withdrawals,
+        timestamp: clock.unix_timestamp,
         epoch: clock.epoch,
     });
     Ok(())
@@ -79,5 +80,7 @@ pub struct WithdrawRequested {
     pub amount: u64,
     pub principal: u64,
     pub pending_withdrawals: u64,
+    /// Same clock the weight accumulators use; the round builder replays it.
+    pub timestamp: i64,
     pub epoch: u64,
 }

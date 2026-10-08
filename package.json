@@ -1,0 +1,19 @@
+{
+  "name": "stakitty-scripts",
+  "private": true,
+  "scripts": {
+    "build-round": "tsx scripts/build-round.ts",
+    "e2e:surfpool": "tsx scripts/e2e-surfpool.ts",
+    "test:scripts": "node --import tsx --test scripts/lib/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anchor-lang/core": "1.2.1",
+    "@solana/web3.js": "1.99.0"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.9",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

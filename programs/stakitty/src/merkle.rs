@@ -26,3 +26,29 @@ pub fn verify(proof: &[[u8; 32]], root: &[u8; 32], leaf: [u8; 32]) -> bool {
         .fold(leaf, |acc, sibling| node_hash(&acc, sibling))
         == *root
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LEAF_A: &str = "44f8f9b9ab53ca607c21a460616c4b0ab54c06658f5a5cde06a93c3af187deb0";
+    const ROOT: &str = "01f395e5fe84cc61f884f544ba6b5c84114430d34aa555c04fd5e725e5e46f77";
+
+    /// Shared with `scripts/lib/merkle.test.ts`: both implementations must produce these bytes.
+    #[test]
+    fn cross_language_vector() {
+        let alice = Pubkey::new_from_array([1u8; 32]);
+        let bob = Pubkey::new_from_array([2u8; 32]);
+        let carol = Pubkey::new_from_array([3u8; 32]);
+        let a = leaf_hash(&alice, 0, 3_000);
+        let b = leaf_hash(&bob, 3_000, 4_000);
+        let c = leaf_hash(&carol, 4_000, 4_500);
+        let root = node_hash(&node_hash(&a, &b), &c);
+        let hex = |h: [u8; 32]| h.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        assert_eq!(hex(a), LEAF_A);
+        assert_eq!(hex(root), ROOT);
+        assert!(verify(&[b, c], &root, a));
+        assert!(verify(&[node_hash(&a, &b)], &root, c));
+        assert!(!verify(&[b, c], &root, leaf_hash(&alice, 0, 3_001)));
+    }
+}
