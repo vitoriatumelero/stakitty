@@ -11,6 +11,14 @@ anchor build --arch v1
 cargo test
 ```
 
+Off-chain scripts (Node 20):
+
+```bash
+npm install
+npm run test:scripts   # Merkle parity with the Rust program, weight replay
+npm run typecheck
+```
+
 `--arch v1` is required. Anchor 1.2.1 builds SBPF v3 by default, and LiteSVM 0.10 cannot load
 that binary: every test fails in `add_program` with `InvalidAccountData`.
 
@@ -63,6 +71,36 @@ The reserve always keeps 15% of `total_principal` undelegated, plus any cap exce
 
 Run `harvest_yield` before `commit_round`, or that yield waits for the following round.
 
+## Building a round list
+
+```bash
+RPC_URL=<rpc> WALLET=<admin keypair> npm run build-round -- --season 1 [--commit]
+```
+
+1. Reads every `Deposited`, `Withdrawn` and `WithdrawRequested` event. Failed transactions
+   are skipped, because their logs can still contain events.
+2. Replays each user's principal over the season's `[start_ts, end_ts]`.
+3. Builds the tree, which `scripts/lib/merkle.test.ts` checks against the Rust hash.
+4. Refuses to continue unless the total equals the on-chain accumulator.
+5. Writes `rounds/season-<n>.json` with every leaf's range and proof. Publish that file so
+   anyone can audit the list. With `--commit`, it also sends `commit_round`.
+
+## End-to-end on Surfpool
+
+```bash
+surfpool start --offline --ci --no-deploy
+anchor deploy --provider.cluster http://127.0.0.1:8899
+RPC_URL=http://127.0.0.1:8899 WALLET=~/.config/solana/id.json npm run e2e:surfpool
+```
+
+The run covers:
+- real vote accounts and two seasons with time travel;
+- rebalance, deactivation of a validator that stopped paying, and settle;
+- the season 1 list rebuilt from events and committed.
+
+The VRF draw is not included, because there is no oracle offline. It was validated on devnet
+by the VRF spike.
+
 ## Withdrawals
 
 - `withdraw`: instant, up to the reserve's liquid SOL minus what open tickets are owed.
@@ -82,8 +120,10 @@ Run `harvest_yield` before `commit_round`, or that yield waits for the following
 - **Ticket wait:** a ticket waits for the next season's rebalance and one epoch of cooldown.
   Claims are first come, first served.
 - **Simplified epochs in tests:** the test helper `set_epoch` backfills `StakeHistory` so every
-  activation or deactivation completes in exactly one epoch. Real warmup and cooldown still
-  need validation on devnet or Surfpool.
+  activation or deactivation completes in exactly one epoch. Surfpool 1.6 time travel leaves
+  `StakeHistory` empty, which the Stake program also treats as instant warmup and cooldown.
+  Real timing (warmup capped by cluster stake) can only be checked on devnet, where an epoch
+  takes ~2 days.
 - **VRF test fixtures:** `tests/fixtures` holds MagicBlock's VRF program and default oracle
   queue, copied from devnet on 08/10/2026. Refresh them if the program is upgraded.
 - **Unaudited:** not reviewed for production use.
