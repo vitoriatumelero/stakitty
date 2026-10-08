@@ -9,7 +9,7 @@ use crate::{
 /// Permissionless after the claim window: the unclaimed prize goes back to the next round.
 #[derive(Accounts)]
 pub struct ExpirePrize<'info> {
-    #[account(mut, seeds = [POOL_SEED], bump = pool.bump)]
+    #[account(mut, seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
     #[account(
         mut,

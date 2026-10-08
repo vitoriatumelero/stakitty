@@ -7,3 +7,6 @@ test-ledger
 .yarn
 .surfpool
 rounds/
+.env
+.env.*
+.stakitty-run/

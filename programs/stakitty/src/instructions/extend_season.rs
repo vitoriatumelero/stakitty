@@ -10,7 +10,7 @@ use crate::{
 #[derive(Accounts)]
 pub struct ExtendSeason<'info> {
     pub authority: Signer<'info>,
-    #[account(seeds = [POOL_SEED], bump = pool.bump, has_one = authority @ StakittyError::Unauthorized)]
+    #[account(seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump, has_one = authority @ StakittyError::Unauthorized)]
     pub pool: Account<'info, Pool>,
     #[account(
         mut,

@@ -6,6 +6,7 @@ use crate::error::StakittyError;
 #[derive(InitSpace)]
 pub struct Pool {
     pub authority: Pubkey,
+    pub pool_id: u16,
     /// Sum of every user's principal. Prize = assets - total_principal - rent, never raw lamports.
     pub total_principal: u64,
     pub min_deposit: u64,

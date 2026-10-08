@@ -9,7 +9,7 @@ use crate::{
 pub struct OpenAccount<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
-    #[account(seeds = [POOL_SEED], bump = pool.bump)]
+    #[account(seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
     #[account(
         init,

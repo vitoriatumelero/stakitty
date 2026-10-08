@@ -17,7 +17,7 @@ use crate::{
 pub struct RequestDraw<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
-    #[account(seeds = [POOL_SEED], bump = pool.bump)]
+    #[account(seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
     #[account(
         mut,

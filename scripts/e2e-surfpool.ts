@@ -24,7 +24,7 @@ import {
   VoteProgram,
 } from '@solana/web3.js';
 import { leafHash, verify } from './lib/merkle.ts';
-import { buildRound, commitRound, connect, loadKeypair, poolPda, PROGRAM_ID, roundPda, seasonPda } from './lib/stakitty.ts';
+import { buildRound, commitRound, connect, loadKeypair, POOL_ID, poolPda, PROGRAM_ID, roundPda, seasonPda } from './lib/stakitty.ts';
 
 const STAKE_PROGRAM = new PublicKey('Stake11111111111111111111111111111111111111');
 const STAKE_CONFIG = new PublicKey('StakeConfig11111111111111111111111111111111');
@@ -129,6 +129,7 @@ async function sponsorAll(validators: Validator[], season: number, amount: BN): 
       .sponsor(amount)
       .accountsStrict({
         withdrawer: v.withdrawer.publicKey,
+        payer: v.withdrawer.publicKey,
         pool,
         prizeVault,
         voteAccount: v.vote,
@@ -211,7 +212,7 @@ async function main(): Promise<void> {
   console.log(`Surfnet ${rpcUrl}, admin ${admin.publicKey.toBase58()}`);
 
   await program.methods
-    .initializePool(sol(0.001), new BN(SEASON_EPOCHS))
+    .initializePool(POOL_ID, sol(0.001), new BN(SEASON_EPOCHS))
     .accountsStrict({
       authority: admin.publicKey,
       pool,

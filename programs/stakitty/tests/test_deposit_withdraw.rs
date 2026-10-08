@@ -266,3 +266,31 @@ fn withdraw_stops_weight_accrual() {
     let later = cumulative_at(a.cumulative_weight, a.principal, a.last_update_ts, 10_000).unwrap();
     assert_eq!(later, u128::from(SOL) * 100);
 }
+
+#[test]
+fn new_pool_id_starts_a_separate_pool() {
+    let mut env = setup();
+    let alice = new_user(&mut env, 2 * SOL);
+    deposit(&mut env, &alice, SOL).unwrap();
+    let admin = env.admin.insecure_clone();
+
+    // Same id again: the PDA already exists.
+    let ix = initialize_pool_ix(&admin.pubkey(), POOL_ID, 5);
+    assert!(send(&mut env.svm, ix, &admin, &[&admin]).is_err());
+
+    let ix = initialize_pool_ix(&admin.pubkey(), 7, 5);
+    send(&mut env.svm, ix, &admin, &[&admin]).unwrap();
+
+    let other = pool_pda(7);
+    assert_ne!(other, env.pool);
+    let acc = env.svm.get_account(&other).unwrap();
+    let fresh = <stakitty::state::Pool as anchor_lang::AccountDeserialize>::try_deserialize(
+        &mut acc.data.as_slice(),
+    )
+    .unwrap();
+    assert_eq!(fresh.pool_id, 7);
+    assert_eq!(fresh.season_length_epochs, 5);
+    assert_eq!(fresh.total_principal, 0);
+    // The original pool is untouched.
+    assert_eq!(pool_state(&env).total_principal, SOL);
+}

@@ -19,11 +19,13 @@ pub mod stakitty {
 
     pub fn initialize_pool(
         ctx: Context<InitializePool>,
+        pool_id: u16,
         min_deposit: u64,
         season_length_epochs: u64,
     ) -> Result<()> {
         crate::instructions::initialize_pool::handle_initialize_pool(
             ctx,
+            pool_id,
             min_deposit,
             season_length_epochs,
         )

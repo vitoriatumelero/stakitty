@@ -13,7 +13,7 @@ use crate::{
 pub struct RequestWithdraw<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
-    #[account(mut, seeds = [POOL_SEED], bump = pool.bump)]
+    #[account(mut, seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
     #[account(
         mut,
@@ -64,6 +64,7 @@ pub fn handle_request_withdraw(ctx: Context<RequestWithdraw>, amount: u64) -> Re
     ticket.bump = ctx.bumps.ticket;
 
     emit!(WithdrawRequested {
+        pool: user.pool,
         user: user.owner,
         amount,
         principal: user.principal,
@@ -76,6 +77,8 @@ pub fn handle_request_withdraw(ctx: Context<RequestWithdraw>, amount: u64) -> Re
 
 #[event]
 pub struct WithdrawRequested {
+    /// Several pools share the program; the round builder filters on this.
+    pub pool: Pubkey,
     pub user: Pubkey,
     pub amount: u64,
     pub principal: u64,
