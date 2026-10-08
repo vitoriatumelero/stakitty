@@ -54,6 +54,7 @@ pub fn handle_initialize_pool(
     pool.current_season = 0;
     pool.season_length_epochs = season_length_epochs;
     pool.validator_count = 0;
+    pool.pending_withdrawals = 0;
     pool.bump = ctx.bumps.pool;
     pool.reserve_bump = ctx.bumps.reserve;
     pool.prize_bump = ctx.bumps.prize_vault;

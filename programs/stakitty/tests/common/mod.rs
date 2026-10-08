@@ -19,8 +19,8 @@ use {
         error::StakittyError,
         state::{Pool, Season, UserAccount, ValidatorEntry},
         POOL_SEED, PRIZE_SEED, RESERVE_SEED, SEASON_SEED, SPONSORSHIP_SEED, STAKE_CONFIG_ID,
-        STAKE_HISTORY_ID, STAKE_PROGRAM_ID, STAKE_SEED, TRANSIENT_SEED, USER_SEED, VALIDATOR_SEED,
-        VOTE_PROGRAM_ID,
+        STAKE_HISTORY_ID, STAKE_PROGRAM_ID, STAKE_SEED, TICKET_SEED, TRANSIENT_SEED, USER_SEED,
+        VALIDATOR_SEED, VOTE_PROGRAM_ID,
     },
 };
 
@@ -471,4 +471,71 @@ pub fn clock_id() -> Pubkey {
 
 pub fn rent_id() -> Pubkey {
     anchor_lang::prelude::pubkey!("SysvarRent111111111111111111111111111111111")
+}
+
+pub fn ticket_pda(env: &Env, owner: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(
+        &[TICKET_SEED, env.pool.as_ref(), owner.as_ref()],
+        &stakitty::id(),
+    )
+    .0
+}
+
+pub fn extend_season_ix(env: &Env, authority: &Pubkey, additional_epochs: u64) -> Instruction {
+    let index = pool_state(env).current_season;
+    Instruction::new_with_bytes(
+        stakitty::id(),
+        &stakitty::instruction::ExtendSeason { additional_epochs }.data(),
+        stakitty::accounts::ExtendSeason {
+            authority: *authority,
+            pool: env.pool,
+            season: season_pda(&env.pool, index),
+        }
+        .to_account_metas(None),
+    )
+}
+
+pub fn extend_season(env: &mut Env, additional_epochs: u64) -> Result<(), String> {
+    let admin = env.admin.insecure_clone();
+    let ix = extend_season_ix(env, &admin.pubkey(), additional_epochs);
+    send(&mut env.svm, ix, &admin, &[&admin])
+}
+
+pub fn request_withdraw(env: &mut Env, user: &Keypair, amount: u64) -> Result<(), String> {
+    let ix = Instruction::new_with_bytes(
+        stakitty::id(),
+        &stakitty::instruction::RequestWithdraw { amount }.data(),
+        stakitty::accounts::RequestWithdraw {
+            owner: user.pubkey(),
+            pool: env.pool,
+            user_account: user_pda(env, &user.pubkey()),
+            ticket: ticket_pda(env, &user.pubkey()),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+    let admin = env.admin.insecure_clone();
+    send(&mut env.svm, ix, &admin, &[&admin, user])
+}
+
+pub fn claim_withdraw_ix(env: &Env, owner: &Pubkey, ticket: Pubkey) -> Instruction {
+    Instruction::new_with_bytes(
+        stakitty::id(),
+        &stakitty::instruction::ClaimWithdraw {}.data(),
+        stakitty::accounts::ClaimWithdraw {
+            owner: *owner,
+            pool: env.pool,
+            reserve: env.reserve,
+            ticket,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    )
+}
+
+/// Admin pays fees so the owner's lamport delta is the payout plus the ticket's rent refund.
+pub fn claim_withdraw(env: &mut Env, user: &Keypair) -> Result<(), String> {
+    let ix = claim_withdraw_ix(env, &user.pubkey(), ticket_pda(env, &user.pubkey()));
+    let admin = env.admin.insecure_clone();
+    send(&mut env.svm, ix, &admin, &[&admin, user])
 }

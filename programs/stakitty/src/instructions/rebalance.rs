@@ -142,9 +142,12 @@ pub fn handle_rebalance(ctx: Context<Rebalance>) -> Result<()> {
     let config = accounts.stake_config.to_account_info();
     let rent_info = accounts.rent.to_account_info();
 
-    let liquid = reserve_info
-        .lamports()
-        .saturating_sub(accounts.rent.minimum_balance(0));
+    let rent_floor = accounts.rent.minimum_balance(0);
+    // New stake may only use lamports not owed to withdraw tickets.
+    let liquid = accounts.pool.spendable(reserve_info.lamports(), rent_floor);
+    // A decrease only borrows the split rent and returns it with the principal, so it may dip
+    // into ticket-earmarked lamports; otherwise pending tickets could block their own unstake.
+    let raw_liquid = reserve_info.lamports().saturating_sub(rent_floor);
     let current = read_stake(&main)?;
 
     let action = match current {
@@ -185,7 +188,7 @@ pub fn handle_rebalance(ctx: Context<Rebalance>) -> Result<()> {
             } else {
                 // Split needs a rent-funded, stake-owned destination.
                 let needed = stake_rent.saturating_sub(transient.lamports());
-                require!(needed <= liquid, StakittyError::InsufficientLiquidity);
+                require!(needed <= raw_liquid, StakittyError::InsufficientLiquidity);
                 cpi.allocate(&transient, transient_seeds, stake_rent)?;
                 cpi.split(&main, &transient, delta)?;
                 cpi.deactivate(&transient)?;

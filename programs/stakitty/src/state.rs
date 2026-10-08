@@ -16,6 +16,8 @@ pub struct Pool {
     pub current_season: u32,
     pub season_length_epochs: u64,
     pub validator_count: u8,
+    /// Lamports owed to open withdraw tickets; earmarked in the reserve, not spendable.
+    pub pending_withdrawals: u64,
     pub bump: u8,
     pub reserve_bump: u8,
     pub prize_bump: u8,
@@ -30,6 +32,17 @@ pub struct UserAccount {
     /// Principal x seconds held. A deposit made just before a draw adds almost no weight.
     pub cumulative_weight: u128,
     pub last_update_ts: i64,
+    pub bump: u8,
+}
+
+/// Principal already deducted from the user, paid once the reserve holds enough liquid SOL.
+#[account]
+#[derive(InitSpace)]
+pub struct WithdrawTicket {
+    pub owner: Pubkey,
+    pub pool: Pubkey,
+    pub amount: u64,
+    pub requested_epoch: u64,
     pub bump: u8,
 }
 
@@ -73,7 +86,7 @@ pub struct Season {
     /// Final capped weights, written once by `close_season`.
     #[max_len(16)]
     pub weights: Vec<ValidatorWeight>,
-    /// Share of principal left liquid in the reserve: cap excess plus rounding.
+    /// Share of principal left liquid: the fixed 15%, plus cap excess and rounding.
     pub reserve_bps: u16,
     /// `pool.total_principal` frozen at the first rebalance, so every validator sizes from one base.
     pub stake_base: Option<u64>,
@@ -109,6 +122,13 @@ pub fn cumulative_at(cumulative: u128, balance: u64, last_ts: i64, now: i64) -> 
 }
 
 impl Pool {
+    /// Reserve lamports free for withdrawals and staking: minus the rent floor and open tickets.
+    pub fn spendable(&self, reserve_lamports: u64, rent_floor: u64) -> u64 {
+        reserve_lamports
+            .saturating_sub(rent_floor)
+            .saturating_sub(self.pending_withdrawals)
+    }
+
     pub fn accrue(&mut self, now: i64) -> Result<()> {
         self.cumulative_weight = cumulative_at(
             self.cumulative_weight,

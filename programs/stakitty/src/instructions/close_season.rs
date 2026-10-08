@@ -38,11 +38,15 @@ pub struct CloseSeason<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// `paid / total` in basis points, capped. The cap excess is not redistributed: it stays liquid.
+/// `paid / total` of the delegable share (100% minus the fixed reserve), in basis points of
+/// total principal, capped. The cap excess is not redistributed: it stays liquid too.
 pub fn capped_weight_bps(paid: u64, total: u64) -> Result<u16> {
     require!(total > 0, StakittyError::NotEnoughValidators);
+    let delegable = BPS_DENOMINATOR
+        .checked_sub(MIN_RESERVE_BPS)
+        .ok_or(StakittyError::Overflow)?;
     let raw = u128::from(paid)
-        .checked_mul(u128::from(BPS_DENOMINATOR))
+        .checked_mul(u128::from(delegable))
         .and_then(|v| v.checked_div(u128::from(total)))
         .ok_or(StakittyError::Overflow)?;
     let raw = u16::try_from(raw).map_err(|_| StakittyError::Overflow)?;
