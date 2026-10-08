@@ -59,4 +59,16 @@ pub mod stakitty {
     pub fn settle_stake(ctx: Context<SettleStake>) -> Result<()> {
         crate::instructions::settle_stake::handle_settle_stake(ctx)
     }
+
+    pub fn extend_season(ctx: Context<ExtendSeason>, additional_epochs: u64) -> Result<()> {
+        crate::instructions::extend_season::handle_extend_season(ctx, additional_epochs)
+    }
+
+    pub fn request_withdraw(ctx: Context<RequestWithdraw>, amount: u64) -> Result<()> {
+        crate::instructions::request_withdraw::handle_request_withdraw(ctx, amount)
+    }
+
+    pub fn claim_withdraw(ctx: Context<ClaimWithdraw>) -> Result<()> {
+        crate::instructions::claim_withdraw::handle_claim_withdraw(ctx)
+    }
 }

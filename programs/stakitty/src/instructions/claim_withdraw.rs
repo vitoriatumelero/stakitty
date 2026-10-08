@@ -4,11 +4,11 @@ use anchor_lang::system_program::{transfer, Transfer};
 use crate::{
     constants::*,
     error::StakittyError,
-    state::{Pool, UserAccount},
+    state::{Pool, WithdrawTicket},
 };
 
 #[derive(Accounts)]
-pub struct Withdraw<'info> {
+pub struct ClaimWithdraw<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
     #[account(mut, seeds = [POOL_SEED], bump = pool.bump)]
@@ -17,37 +17,28 @@ pub struct Withdraw<'info> {
     pub reserve: SystemAccount<'info>,
     #[account(
         mut,
+        close = owner,
         has_one = owner @ StakittyError::Unauthorized,
         has_one = pool,
-        seeds = [USER_SEED, pool.key().as_ref(), owner.key().as_ref()],
-        bump = user_account.bump
+        seeds = [TICKET_SEED, pool.key().as_ref(), owner.key().as_ref()],
+        bump = ticket.bump
     )]
-    pub user_account: Account<'info, UserAccount>,
+    pub ticket: Account<'info, WithdrawTicket>,
     pub system_program: Program<'info, System>,
 }
 
-pub fn handle_withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
-    require!(amount > 0, StakittyError::ZeroAmount);
+pub fn handle_claim_withdraw(ctx: Context<ClaimWithdraw>) -> Result<()> {
+    let amount = ctx.accounts.ticket.amount;
+    // Tickets are paid from earmarked lamports, so only the rent floor is excluded here.
+    let rent_floor = Rent::get()?.minimum_balance(0);
+    let liquid = ctx.accounts.reserve.lamports().saturating_sub(rent_floor);
+    require!(amount <= liquid, StakittyError::InsufficientLiquidity);
 
-    let now = Clock::get()?.unix_timestamp;
     let pool = &mut ctx.accounts.pool;
-    let user = &mut ctx.accounts.user_account;
-    pool.accrue(now)?;
-    user.accrue(now)?;
-
-    user.principal = user
-        .principal
-        .checked_sub(amount)
-        .ok_or(StakittyError::InsufficientPrincipal)?;
-    pool.total_principal = pool
-        .total_principal
+    pool.pending_withdrawals = pool
+        .pending_withdrawals
         .checked_sub(amount)
         .ok_or(StakittyError::Overflow)?;
-
-    // Larger requests go through `request_withdraw`; lamports owed to tickets are off limits.
-    let rent_floor = Rent::get()?.minimum_balance(0);
-    let liquid = pool.spendable(ctx.accounts.reserve.lamports(), rent_floor);
-    require!(amount <= liquid, StakittyError::InsufficientLiquidity);
 
     let pool_key = pool.key();
     let reserve_seeds: &[&[u8]] = &[RESERVE_SEED, pool_key.as_ref(), &[pool.reserve_bump]];
@@ -63,21 +54,19 @@ pub fn handle_withdraw(ctx: Context<Withdraw>, amount: u64) -> Result<()> {
         amount,
     )?;
 
-    emit!(Withdrawn {
-        user: user.owner,
+    emit!(WithdrawClaimed {
+        user: ctx.accounts.owner.key(),
         amount,
-        principal: user.principal,
-        total_principal: pool.total_principal,
-        timestamp: now,
+        pending_withdrawals: pool.pending_withdrawals,
+        epoch: Clock::get()?.epoch,
     });
     Ok(())
 }
 
 #[event]
-pub struct Withdrawn {
+pub struct WithdrawClaimed {
     pub user: Pubkey,
     pub amount: u64,
-    pub principal: u64,
-    pub total_principal: u64,
-    pub timestamp: i64,
+    pub pending_withdrawals: u64,
+    pub epoch: u64,
 }

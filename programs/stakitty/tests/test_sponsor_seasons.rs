@@ -4,10 +4,18 @@ use {
     common::*,
     solana_keypair::Keypair,
     solana_signer::Signer,
-    stakitty::{error::StakittyError, state::SeasonStatus, MAX_WEIGHT_BPS, STAKE_PROGRAM_ID},
+    stakitty::{
+        error::StakittyError, state::SeasonStatus, MAX_WEIGHT_BPS, MIN_RESERVE_BPS,
+        STAKE_PROGRAM_ID,
+    },
 };
 
 const PRINCIPAL: u64 = 1_000 * SOL;
+
+/// `bps` of PRINCIPAL in lamports.
+fn share(bps: u64) -> u64 {
+    PRINCIPAL * bps / 10_000
+}
 
 fn validators(env: &mut Env, n: usize) -> Vec<Validator> {
     (0..n).map(|_| listed_validator(env)).collect()
@@ -148,8 +156,9 @@ fn equal_payments_split_weight_evenly() {
 
     let season = season_state(&env, 0);
     assert_eq!(season.status, SeasonStatus::Closed);
-    assert!(season.weights.iter().all(|w| w.weight_bps == 2_500));
-    assert_eq!(season.reserve_bps, 0);
+    // Weights split the delegable 85%; the fixed 15% stays in the reserve.
+    assert!(season.weights.iter().all(|w| w.weight_bps == 2_125));
+    assert_eq!(season.reserve_bps, MIN_RESERVE_BPS);
     assert_eq!(pool_state(&env).current_season, 1);
     assert_eq!(season_state(&env, 1).status, SeasonStatus::Open);
 }
@@ -169,12 +178,12 @@ fn attack_cannot_exceed_35_percent() {
 
     let season = season_state(&env, 0);
     assert_eq!(season.weight_of(&vs[0].vote), MAX_WEIGHT_BPS);
-    assert_eq!(season.weight_of(&vs[1].vote), 100);
-    // Cap excess is not redistributed; it stays liquid in the reserve.
-    assert_eq!(season.reserve_bps, 10_000 - 3_500 - 300);
+    assert_eq!(season.weight_of(&vs[1].vote), 85);
+    // Cap excess is not redistributed; it stays liquid on top of the fixed 15%.
+    assert_eq!(season.reserve_bps, 10_000 - 3_500 - 3 * 85);
 
     rebalance(&mut env, &vs[0].vote, 0).unwrap();
-    assert_eq!(stake_lamports(&env, &vs[0].vote), PRINCIPAL * 35 / 100);
+    assert_eq!(stake_lamports(&env, &vs[0].vote), share(3_500));
 }
 
 #[test]
@@ -218,11 +227,14 @@ fn rebalance_stakes_from_reserve_and_conserves_principal() {
 
     for v in &vs {
         rebalance(&mut env, &v.vote, 0).unwrap();
-        assert_eq!(stake_lamports(&env, &v.vote), PRINCIPAL / 4);
+        assert_eq!(stake_lamports(&env, &v.vote), share(2_125));
     }
 
-    // All principal now sits in stake accounts; the prize vault was never touched.
-    assert_eq!(lamports(&env, &env.reserve), RESERVE_RENT_FLOOR);
+    // 85% is staked, 15% is never delegated; the prize vault was never touched.
+    assert_eq!(
+        lamports(&env, &env.reserve),
+        RESERVE_RENT_FLOOR + share(1_500)
+    );
     assert_eq!(lamports(&env, &env.prize_vault), prize);
 }
 
@@ -238,7 +250,7 @@ fn stopped_payer_is_deactivated_and_returned_after_cooldown() {
     }
     let quitter = &vs[4];
     let quitter_stake = stake_lamports(&env, &quitter.vote);
-    assert_eq!(quitter_stake, PRINCIPAL / 5);
+    assert_eq!(quitter_stake, share(1_700));
 
     // Season 1: the fifth validator stops paying.
     sponsor_all(&mut env, &all[..4], &[SOL; 4]);
@@ -270,18 +282,15 @@ fn weight_increase_waits_one_epoch_before_merge() {
     close_season(&mut env, &refs).unwrap();
     // Only one validator rebalanced, so the reserve keeps liquidity for the next increase.
     rebalance(&mut env, &vs[0].vote, 0).unwrap();
-    assert_eq!(stake_lamports(&env, &vs[0].vote), PRINCIPAL / 4);
+    assert_eq!(stake_lamports(&env, &vs[0].vote), share(2_125));
 
-    // Season 1: validator 0 pays 7/10 -> capped at 35%.
+    // Season 1: validator 0 pays 7/10 -> 59.5% of principal, capped at 35%.
     sponsor_all(&mut env, &refs, &[7 * SOL, SOL, SOL, SOL]);
     end_current_season(&mut env);
     close_season(&mut env, &refs).unwrap();
     rebalance(&mut env, &vs[0].vote, 1).unwrap();
     let transient = transient_pda(&env, &vs[0].vote);
-    assert_eq!(
-        lamports(&env, &transient),
-        PRINCIPAL * 35 / 100 - PRINCIPAL / 4
-    );
+    assert_eq!(lamports(&env, &transient), share(3_500) - share(2_125));
 
     // Same epoch: transient is still activating, merge must wait.
     assert_custom_err(
@@ -293,7 +302,7 @@ fn weight_increase_waits_one_epoch_before_merge() {
     set_epoch(&mut env, epoch + 1);
     settle(&mut env, &vs[0].vote).unwrap();
 
-    assert_eq!(stake_lamports(&env, &vs[0].vote), PRINCIPAL * 35 / 100);
+    assert_eq!(stake_lamports(&env, &vs[0].vote), share(3_500));
     assert_eq!(lamports(&env, &transient), 0);
 }
 
@@ -306,13 +315,13 @@ fn weight_decrease_splits_and_returns_after_cooldown() {
     close_season(&mut env, &refs).unwrap();
     rebalance(&mut env, &vs[0].vote, 0).unwrap();
 
-    // Season 1: validator 0 pays 1/10 of the total -> 10%.
+    // Season 1: validator 0 pays 1/10 of the total -> 8.5% of principal.
     sponsor_all(&mut env, &refs, &[SOL, 3 * SOL, 3 * SOL, 3 * SOL]);
     end_current_season(&mut env);
     close_season(&mut env, &refs).unwrap();
     let reserve_before = lamports(&env, &env.reserve);
     rebalance(&mut env, &vs[0].vote, 1).unwrap();
-    assert_eq!(stake_lamports(&env, &vs[0].vote), PRINCIPAL / 10);
+    assert_eq!(stake_lamports(&env, &vs[0].vote), share(850));
 
     let epoch = season_state(&env, 1).end_epoch;
     set_epoch(&mut env, epoch + 1);
@@ -321,7 +330,7 @@ fn weight_decrease_splits_and_returns_after_cooldown() {
     // The split-off principal is back in the reserve, rent prefund included.
     assert_eq!(
         lamports(&env, &env.reserve),
-        reserve_before + PRINCIPAL / 4 - PRINCIPAL / 10
+        reserve_before + share(2_125) - share(850)
     );
     assert_eq!(lamports(&env, &transient_pda(&env, &vs[0].vote)), 0);
 }
@@ -340,10 +349,10 @@ fn attack_prefunding_stake_pda_cannot_block_rebalance() {
 
     rebalance(&mut env, &vs[0].vote, 0).unwrap();
 
-    assert_eq!(stake_lamports(&env, &vs[0].vote), PRINCIPAL / 4);
+    assert_eq!(stake_lamports(&env, &vs[0].vote), share(2_125));
     // The donation counts toward the target, so the reserve sends 1 SOL less.
     assert_eq!(
         lamports(&env, &env.reserve),
-        reserve_before - (PRINCIPAL / 4 - SOL)
+        reserve_before - (share(2_125) - SOL)
     );
 }

@@ -38,6 +38,13 @@ pub const MIN_SEASON_VALIDATORS: u8 = 4;
 #[constant]
 pub const MAX_WEIGHT_BPS: u16 = 3_500;
 
+/// Share of principal never delegated: validator weights are scaled to the remaining 85%.
+#[constant]
+pub const MIN_RESERVE_BPS: u16 = 1_500;
+
+#[constant]
+pub const TICKET_SEED: &[u8] = b"ticket";
+
 pub const BPS_DENOMINATOR: u16 = 10_000;
 
 pub const VOTE_PROGRAM_ID: Pubkey = pubkey!("Vote111111111111111111111111111111111111111");
