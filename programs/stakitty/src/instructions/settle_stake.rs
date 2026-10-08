@@ -11,7 +11,7 @@ use crate::{
 /// main stake, and returns cooled-down stake (principal + rewards) to the reserve.
 #[derive(Accounts)]
 pub struct SettleStake<'info> {
-    #[account(mut, seeds = [POOL_SEED], bump = pool.bump)]
+    #[account(mut, seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
     #[account(
         mut,

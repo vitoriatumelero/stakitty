@@ -13,7 +13,7 @@ use crate::{
 pub struct CommitRound<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
-    #[account(mut, seeds = [POOL_SEED], bump = pool.bump, has_one = authority @ StakittyError::Unauthorized)]
+    #[account(mut, seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump, has_one = authority @ StakittyError::Unauthorized)]
     pub pool: Account<'info, Pool>,
     #[account(
         has_one = pool,

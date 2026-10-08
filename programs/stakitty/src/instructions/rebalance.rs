@@ -12,7 +12,7 @@ use crate::{
 /// next change until `settle_stake` runs after the epoch boundary.
 #[derive(Accounts)]
 pub struct Rebalance<'info> {
-    #[account(seeds = [POOL_SEED], bump = pool.bump)]
+    #[account(seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
     #[account(
         mut,

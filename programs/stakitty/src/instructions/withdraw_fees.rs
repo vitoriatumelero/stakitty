@@ -7,7 +7,7 @@ use crate::{constants::*, error::StakittyError, state::Pool};
 pub struct WithdrawFees<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
-    #[account(seeds = [POOL_SEED], bump = pool.bump, has_one = authority @ StakittyError::Unauthorized)]
+    #[account(seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump, has_one = authority @ StakittyError::Unauthorized)]
     pub pool: Account<'info, Pool>,
     #[account(mut, seeds = [FEE_SEED, pool.key().as_ref()], bump = pool.fee_bump)]
     pub fee_vault: SystemAccount<'info>,

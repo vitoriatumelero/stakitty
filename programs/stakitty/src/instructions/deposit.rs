@@ -11,7 +11,7 @@ use crate::{
 pub struct Deposit<'info> {
     #[account(mut)]
     pub owner: Signer<'info>,
-    #[account(mut, seeds = [POOL_SEED], bump = pool.bump)]
+    #[account(mut, seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
     #[account(mut, seeds = [RESERVE_SEED, pool.key().as_ref()], bump = pool.reserve_bump)]
     pub reserve: SystemAccount<'info>,
@@ -60,6 +60,7 @@ pub fn handle_deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
         .ok_or(StakittyError::Overflow)?;
 
     emit!(Deposited {
+        pool: user.pool,
         user: user.owner,
         amount,
         principal: user.principal,
@@ -71,6 +72,8 @@ pub fn handle_deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
 
 #[event]
 pub struct Deposited {
+    /// Several pools share the program; the round builder filters on this.
+    pub pool: Pubkey,
     pub user: Pubkey,
     pub amount: u64,
     pub principal: u64,

@@ -1,0 +1,24 @@
+# LOCAL DEMO ONLY. Stand-in for MagicBlock's VRF program on solana-test-validator, where no
+# oracle runs. Never deploy it: it has no keypair for its address and is loaded with
+# `--bpf-program Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz`.
+[package]
+name = "vrf-oracle-mock"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+solana-program = "3"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+
+# Standalone: not part of the program workspace that `anchor deploy` ships.
+[workspace]

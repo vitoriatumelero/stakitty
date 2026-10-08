@@ -5,7 +5,9 @@
     "build-round": "tsx scripts/build-round.ts",
     "e2e:surfpool": "tsx scripts/e2e-surfpool.ts",
     "test:scripts": "node --import tsx --test scripts/lib/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo:local": "tsx scripts/demo-local.ts",
+    "cluster-run": "tsx scripts/cluster-run.ts"
   },
   "dependencies": {
     "@anchor-lang/core": "1.2.1",

@@ -7,7 +7,10 @@ use crate::{
     state::{Pool, Season, SeasonStatus},
 };
 
+/// `pool_id` is part of the pool seed, so a new id starts a fresh pool (e.g. to change
+/// parameters on a test cluster) without touching an existing one.
 #[derive(Accounts)]
+#[instruction(pool_id: u16)]
 pub struct InitializePool<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -15,7 +18,7 @@ pub struct InitializePool<'info> {
         init,
         payer = authority,
         space = Pool::DISCRIMINATOR.len() + Pool::INIT_SPACE,
-        seeds = [POOL_SEED],
+        seeds = [POOL_SEED, &pool_id.to_le_bytes()],
         bump
     )]
     pub pool: Account<'info, Pool>,
@@ -41,6 +44,7 @@ pub struct InitializePool<'info> {
 
 pub fn handle_initialize_pool(
     ctx: Context<InitializePool>,
+    pool_id: u16,
     min_deposit: u64,
     season_length_epochs: u64,
 ) -> Result<()> {
@@ -50,6 +54,7 @@ pub fn handle_initialize_pool(
     let clock = Clock::get()?;
     let pool = &mut ctx.accounts.pool;
     pool.authority = ctx.accounts.authority.key();
+    pool.pool_id = pool_id;
     pool.total_principal = 0;
     pool.min_deposit = min_deposit;
     pool.cumulative_weight = 0;

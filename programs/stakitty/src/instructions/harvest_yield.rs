@@ -7,7 +7,7 @@ use crate::{constants::*, error::StakittyError, state::Pool};
 /// `PROTOCOL_FEE_BPS` to the fee vault and the rest to the prize vault.
 #[derive(Accounts)]
 pub struct HarvestYield<'info> {
-    #[account(mut, seeds = [POOL_SEED], bump = pool.bump)]
+    #[account(mut, seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
     #[account(mut, seeds = [RESERVE_SEED, pool.key().as_ref()], bump = pool.reserve_bump)]
     pub reserve: SystemAccount<'info>,

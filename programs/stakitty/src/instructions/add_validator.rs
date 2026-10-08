@@ -11,7 +11,7 @@ use crate::{
 pub struct AddValidator<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
-    #[account(mut, seeds = [POOL_SEED], bump = pool.bump, has_one = authority @ StakittyError::Unauthorized)]
+    #[account(mut, seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump, has_one = authority @ StakittyError::Unauthorized)]
     pub pool: Account<'info, Pool>,
     /// CHECK: owner and layout validated by `vote_withdrawer`.
     pub vote_account: UncheckedAccount<'info>,

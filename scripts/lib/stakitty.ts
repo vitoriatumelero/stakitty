@@ -18,7 +18,14 @@ const u32Le = (n: number): Buffer => {
 };
 const pda = (seeds: Buffer[]): PublicKey => PublicKey.findProgramAddressSync(seeds, PROGRAM_ID)[0];
 
-export const poolPda = (): PublicKey => pda([seed('pool')]);
+/** Pool to operate on; a new id starts a separate pool (`initialize_pool` fixes params). */
+export const POOL_ID = Number.parseInt(process.env.POOL_ID ?? '0', 10);
+const u16Le = (n: number): Buffer => {
+  const b = Buffer.alloc(2);
+  b.writeUInt16LE(n);
+  return b;
+};
+export const poolPda = (poolId: number = POOL_ID): PublicKey => pda([seed('pool'), u16Le(poolId)]);
 export const seasonPda = (index: number): PublicKey => pda([seed('season'), poolPda().toBuffer(), u32Le(index)]);
 export const roundPda = (index: number): PublicKey => pda([seed('round'), poolPda().toBuffer(), u32Le(index)]);
 
@@ -60,7 +67,7 @@ export async function buildRound(program: Program<Stakitty>, season: number): Pr
   const endTs = BigInt(state.endTs.toString());
   const expected = BigInt(state.endPoolWeight.toString()) - BigInt(state.startPoolWeight.toString());
 
-  const changes = await fetchPrincipalChanges(program.provider.connection, PROGRAM_ID, idl);
+  const changes = await fetchPrincipalChanges(program.provider.connection, PROGRAM_ID, idl, poolPda());
   const weights = seasonWeights(changes, startTs, endTs);
   const leaves = toLeaves(weights);
   const total = leaves.length ? leaves[leaves.length - 1].rangeEnd : 0n;

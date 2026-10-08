@@ -26,7 +26,7 @@ that binary: every test fails in `add_program` with `InvalidAccountData`.
 
 | PDA | Seeds | Holds |
 |-----|-------|-------|
-| `Pool` | `pool` | Totals, season counter, open ticket total |
+| `Pool` | `pool, pool_id (u16)` | Totals, season counter, open ticket total |
 | Reserve | `reserve, pool` | Liquid principal; staker and withdrawer of every stake account |
 | Prize vault | `prize, pool` | Sponsor SOL and the 80% yield share. No withdraw path reads it |
 | Fee vault | `fee, pool` | 20% protocol share of yield. Admin-only withdrawals |
@@ -38,10 +38,14 @@ that binary: every test fails in `add_program` with `InvalidAccountData`.
 | Stake / transient | `stake` or `transient, pool, vote` | Delegated stake and its pending change |
 | `Round` | `round, pool, season` | Merkle root, VRF result and prize for one season |
 
+`initialize_pool(pool_id, ...)` fixes the admin and parameters. A new `pool_id` starts a separate
+pool, for example to change the season length on a test cluster.
+
 ## Season flow
 
-1. `sponsor(amount)`: signed by the vote account's `authorized_withdrawer`. SOL goes to the
-   prize vault. Payments made in season `s` set the stake for season `s+1` and fund its prizes.
+1. `sponsor(amount)`: signed by the vote account's `authorized_withdrawer`. A separate
+   `payer` funds it, because the withdrawer may be a cold wallet or the vote account itself,
+   and those can't pay a transfer. SOL goes to the prize vault. Payments made in season `s` set the stake for season `s+1` and fund its prizes.
 2. `close_season`: permissionless after the end epoch, with every sponsorship of the season.
    The weight is `paid / total` of the delegable 85% of principal, capped at 35%. It needs at
    least 4 paying validators.
@@ -85,6 +89,42 @@ RPC_URL=<rpc> WALLET=<admin keypair> npm run build-round -- --season 1 [--commit
 5. Writes `rounds/season-<n>.json` with every leaf's range and proof. Publish that file so
    anyone can audit the list. With `--commit`, it also sends `commit_round`.
 
+## Recorded demo (local validator, real epochs)
+
+```bash
+solana-test-validator --reset --slots-per-epoch 64 \
+  --bpf-program 8dFfRCbNDeYt9y96ZC8uCcU2BbXt2LwWEH91ZUN3BRQg target/deploy/stakitty.so \
+  --bpf-program Vrf1RNUjXmQGjmQrQLvJHs9SNkvDJEsRVFPkfSQUwGz mocks/vrf-oracle-mock/target/deploy/vrf_oracle_mock.so
+RPC_URL=http://127.0.0.1:8899 WALLET=~/.config/solana/id.json LEDGER=test-ledger npm run demo:local
+```
+
+The demo runs deposit → sponsor → close_season → rebalance → stake activation → VRF draw
+→ prize → withdraw, and takes about 3 minutes.
+- **Real stake mechanics:** epochs last ~25 s, and the bank keeps `StakeHistory`, so the
+  activation is the cluster's own bookkeeping.
+- **Real yield:** the local validator votes, so the stake delegated to it earns rewards.
+- **Mocked VRF:** the draw is a **local mock** of the MagicBlock oracle
+  (`mocks/vrf-oracle-mock`, built with
+  `cargo-build-sbf --arch v1 --tools-version v1.57`). It is loaded at the VRF program id and
+  signs the callback with the same scoped identity PDA. It is never deployed. On devnet the
+  real VRF answers.
+
+## Devnet run (one crank per epoch boundary)
+
+```bash
+RPC_URL=https://api.devnet.solana.com WALLET=~/.config/solana/id.json POOL_ID=1 npm run cluster-run -- setup
+RPC_URL=... WALLET=... POOL_ID=1 npm run cluster-run -- advance   # after each boundary (~28 h)
+```
+
+`advance` is idempotent: it closes seasons, pays sponsors, settles, rebalances, harvests, and
+commits, draws and claims round 1. It prints explorer links for every transaction.
+- Demo keypairs are kept in `.stakitty-run/`, which is gitignored and holds throwaway test
+  keys only.
+- It refuses mainnet URLs.
+- To check it locally: add `MOCK_VRF=1 SEASON_EPOCHS=3 AMOUNT_SCALE=20` against the local
+  validator. The scale is there because the minimum delegation is 1 SOL locally and
+  1 lamport on devnet.
+
 ## End-to-end on Surfpool
 
 ```bash
@@ -126,4 +166,6 @@ by the VRF spike.
   takes ~2 days.
 - **VRF test fixtures:** `tests/fixtures` holds MagicBlock's VRF program and default oracle
   queue, copied from devnet on 08/10/2026. Refresh them if the program is upgraded.
+- **Program upgrades** on a cluster need a buffer as large as the program (~2.6 SOL
+  temporarily, refunded after the upgrade).
 - **Unaudited:** not reviewed for production use.

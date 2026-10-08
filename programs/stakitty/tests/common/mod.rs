@@ -28,6 +28,7 @@ use {
 };
 
 pub const SOL: u64 = 1_000_000_000;
+pub const POOL_ID: u16 = 0;
 pub const MIN_DEPOSIT: u64 = SOL / 1_000;
 pub const SEASON_EPOCHS: u64 = 3;
 pub const RESERVE_RENT_FLOOR: u64 = 890_880;
@@ -126,7 +127,7 @@ fn setup_with(mut svm: LiteSVM) -> Env {
 
     let admin = Keypair::new();
     svm.airdrop(&admin.pubkey(), 100 * SOL).unwrap();
-    let pool = Pubkey::find_program_address(&[POOL_SEED], &program_id).0;
+    let pool = pool_pda(POOL_ID);
     let reserve = Pubkey::find_program_address(&[RESERVE_SEED, pool.as_ref()], &program_id).0;
     let prize_vault = Pubkey::find_program_address(&[PRIZE_SEED, pool.as_ref()], &program_id).0;
     let fee_vault = Pubkey::find_program_address(&[FEE_SEED, pool.as_ref()], &program_id).0;
@@ -134,6 +135,7 @@ fn setup_with(mut svm: LiteSVM) -> Env {
     let ix = Instruction::new_with_bytes(
         program_id,
         &stakitty::instruction::InitializePool {
+            pool_id: POOL_ID,
             min_deposit: MIN_DEPOSIT,
             season_length_epochs: SEASON_EPOCHS,
         }
@@ -400,6 +402,7 @@ pub fn sponsor_ix(env: &Env, signer: &Pubkey, vote: &Pubkey, amount: u64) -> Ins
         &stakitty::instruction::Sponsor { amount }.data(),
         stakitty::accounts::Sponsor {
             withdrawer: *signer,
+            payer: *signer,
             pool: env.pool,
             prize_vault: env.prize_vault,
             vote_account: *vote,
@@ -841,6 +844,36 @@ pub fn withdraw_fees_ix(env: &Env, authority: &Pubkey, amount: u64) -> Instructi
             authority: *authority,
             pool: env.pool,
             fee_vault: env.fee_vault,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    )
+}
+
+pub fn pool_pda(pool_id: u16) -> Pubkey {
+    Pubkey::find_program_address(&[POOL_SEED, &pool_id.to_le_bytes()], &stakitty::id()).0
+}
+
+/// `initialize_pool` for an arbitrary id, with every PDA derived from that pool.
+pub fn initialize_pool_ix(admin: &Pubkey, pool_id: u16, season_length_epochs: u64) -> Instruction {
+    let program_id = stakitty::id();
+    let pool = pool_pda(pool_id);
+    let vault = |seed: &[u8]| Pubkey::find_program_address(&[seed, pool.as_ref()], &program_id).0;
+    Instruction::new_with_bytes(
+        program_id,
+        &stakitty::instruction::InitializePool {
+            pool_id,
+            min_deposit: MIN_DEPOSIT,
+            season_length_epochs,
+        }
+        .data(),
+        stakitty::accounts::InitializePool {
+            authority: *admin,
+            pool,
+            reserve: vault(RESERVE_SEED),
+            prize_vault: vault(PRIZE_SEED),
+            fee_vault: vault(FEE_SEED),
+            first_season: season_pda(&pool, 0),
             system_program: system_program::ID,
         }
         .to_account_metas(None),

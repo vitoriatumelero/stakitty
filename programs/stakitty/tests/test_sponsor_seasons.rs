@@ -356,3 +356,36 @@ fn attack_prefunding_stake_pda_cannot_block_rebalance() {
         reserve_before - (share(2_125) - SOL)
     );
 }
+
+#[test]
+fn separate_payer_can_fund_with_withdrawer_signature() {
+    let (mut env, vs) = funded_env(1);
+    let funder = Keypair::new();
+    env.svm.airdrop(&funder.pubkey(), 10 * SOL).unwrap();
+    let withdrawer_before = lamports(&env, &vs[0].withdrawer.pubkey());
+
+    let mut ix = sponsor_ix(&env, &vs[0].withdrawer.pubkey(), &vs[0].vote, 2 * SOL);
+    ix.accounts[1].pubkey = funder.pubkey();
+    send(&mut env.svm, ix, &funder, &[&funder, &vs[0].withdrawer]).unwrap();
+
+    assert_eq!(season_state(&env, 0).total_paid, 2 * SOL);
+    assert_eq!(
+        lamports(&env, &vs[0].withdrawer.pubkey()),
+        withdrawer_before
+    );
+}
+
+#[test]
+fn attack_payer_without_withdrawer_signature_fails() {
+    let (mut env, vs) = funded_env(1);
+    let mallory = Keypair::new();
+    env.svm.airdrop(&mallory.pubkey(), 10 * SOL).unwrap();
+
+    // Mallory pays and signs as both roles: still not the vote account's withdrawer.
+    let mut ix = sponsor_ix(&env, &mallory.pubkey(), &vs[0].vote, SOL);
+    ix.accounts[1].pubkey = mallory.pubkey();
+    assert_custom_err(
+        send(&mut env.svm, ix, &mallory, &[&mallory]),
+        code(StakittyError::NotVoteWithdrawer),
+    );
+}

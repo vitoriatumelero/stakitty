@@ -10,10 +10,13 @@ use crate::{
 
 #[derive(Accounts)]
 pub struct Sponsor<'info> {
-    /// Must be the vote account's authorized withdrawer.
-    #[account(mut)]
+    /// Must be the vote account's authorized withdrawer. Only authorizes: it may be a cold
+    /// wallet or the vote account itself, which cannot fund a transfer.
     pub withdrawer: Signer<'info>,
-    #[account(seeds = [POOL_SEED], bump = pool.bump)]
+    /// Funds the sponsorship and the sponsorship account's rent.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(seeds = [POOL_SEED, &pool.pool_id.to_le_bytes()], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
     #[account(mut, seeds = [PRIZE_SEED, pool.key().as_ref()], bump = pool.prize_bump)]
     pub prize_vault: SystemAccount<'info>,
@@ -38,7 +41,7 @@ pub struct Sponsor<'info> {
     /// One payment per validator per season (`init`, not `init_if_needed`).
     #[account(
         init,
-        payer = withdrawer,
+        payer = payer,
         space = SeasonSponsorship::DISCRIMINATOR.len() + SeasonSponsorship::INIT_SPACE,
         seeds = [SPONSORSHIP_SEED, season.key().as_ref(), vote_account.key().as_ref()],
         bump
@@ -64,7 +67,7 @@ pub fn handle_sponsor(ctx: Context<Sponsor>, amount: u64) -> Result<()> {
         CpiContext::new(
             ctx.accounts.system_program.key(),
             Transfer {
-                from: ctx.accounts.withdrawer.to_account_info(),
+                from: ctx.accounts.payer.to_account_info(),
                 to: ctx.accounts.prize_vault.to_account_info(),
             },
         ),
