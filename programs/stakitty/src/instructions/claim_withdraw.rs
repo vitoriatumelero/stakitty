@@ -29,9 +29,15 @@ pub struct ClaimWithdraw<'info> {
 
 pub fn handle_claim_withdraw(ctx: Context<ClaimWithdraw>) -> Result<()> {
     let amount = ctx.accounts.ticket.amount;
-    // Tickets are paid from earmarked lamports, so only the rent floor is excluded here.
+    // Tickets are paid from earmarked lamports: only the rent floor and unharvested yield
+    // are excluded here.
     let rent_floor = Rent::get()?.minimum_balance(0);
-    let liquid = ctx.accounts.reserve.lamports().saturating_sub(rent_floor);
+    let liquid = ctx
+        .accounts
+        .reserve
+        .lamports()
+        .saturating_sub(rent_floor)
+        .saturating_sub(ctx.accounts.pool.realized_yield);
     require!(amount <= liquid, StakittyError::InsufficientLiquidity);
 
     let pool = &mut ctx.accounts.pool;

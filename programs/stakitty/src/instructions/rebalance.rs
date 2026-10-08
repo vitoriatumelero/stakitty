@@ -149,6 +149,7 @@ pub fn handle_rebalance(ctx: Context<Rebalance>) -> Result<()> {
     // into ticket-earmarked lamports; otherwise pending tickets could block their own unstake.
     let raw_liquid = reserve_info.lamports().saturating_sub(rent_floor);
     let current = read_stake(&main)?;
+    let reserve_before = reserve_info.lamports();
 
     let action = match current {
         None if target == 0 => RebalanceAction::None,
@@ -197,10 +198,18 @@ pub fn handle_rebalance(ctx: Context<Rebalance>) -> Result<()> {
         }
     };
 
+    // Every lamport that left the reserve went into this validator's stake accounts.
+    let moved_in = reserve_before
+        .checked_sub(reserve_info.lamports())
+        .ok_or(StakittyError::Overflow)?;
     let season = &mut ctx.accounts.season;
     season.stake_base = Some(stake_base);
     let entry = &mut ctx.accounts.validator_entry;
     entry.rebalanced_through = season_index.checked_add(1).ok_or(StakittyError::Overflow)?;
+    entry.stake_basis = entry
+        .stake_basis
+        .checked_add(moved_in)
+        .ok_or(StakittyError::Overflow)?;
 
     emit!(Rebalanced {
         vote_account: vote_key,

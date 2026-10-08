@@ -25,6 +25,9 @@ pub struct InitializePool<'info> {
     /// Sponsor SOL only. Separate from the reserve so principal withdrawals cannot reach it.
     #[account(mut, seeds = [PRIZE_SEED, pool.key().as_ref()], bump)]
     pub prize_vault: SystemAccount<'info>,
+    /// Protocol share of staking yield. Admin-only withdrawals.
+    #[account(mut, seeds = [FEE_SEED, pool.key().as_ref()], bump)]
+    pub fee_vault: SystemAccount<'info>,
     #[account(
         init,
         payer = authority,
@@ -55,6 +58,10 @@ pub fn handle_initialize_pool(
     pool.season_length_epochs = season_length_epochs;
     pool.validator_count = 0;
     pool.pending_withdrawals = 0;
+    pool.realized_yield = 0;
+    pool.prize_available = 0;
+    pool.committed_prizes = 0;
+    pool.fee_bump = ctx.bumps.fee_vault;
     pool.bump = ctx.bumps.pool;
     pool.reserve_bump = ctx.bumps.reserve;
     pool.prize_bump = ctx.bumps.prize_vault;
@@ -67,6 +74,10 @@ pub fn handle_initialize_pool(
         .epoch
         .checked_add(season_length_epochs)
         .ok_or(StakittyError::Overflow)?;
+    season.start_ts = clock.unix_timestamp;
+    season.start_pool_weight = 0;
+    season.end_ts = 0;
+    season.end_pool_weight = 0;
     season.total_paid = 0;
     season.sponsor_count = 0;
     season.status = SeasonStatus::Open;
@@ -75,9 +86,13 @@ pub fn handle_initialize_pool(
     season.stake_base = None;
     season.bump = ctx.bumps.first_season;
 
-    // Make both vaults rent-exempt up front; these lamports are never principal or prize.
+    // Make the vaults rent-exempt up front; these lamports are never principal, prize or fee.
     let rent_floor = Rent::get()?.minimum_balance(0);
-    for vault in [&ctx.accounts.reserve, &ctx.accounts.prize_vault] {
+    for vault in [
+        &ctx.accounts.reserve,
+        &ctx.accounts.prize_vault,
+        &ctx.accounts.fee_vault,
+    ] {
         let missing = rent_floor.saturating_sub(vault.lamports());
         if missing > 0 {
             transfer(

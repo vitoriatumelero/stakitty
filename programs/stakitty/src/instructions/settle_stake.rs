@@ -11,9 +11,10 @@ use crate::{
 /// main stake, and returns cooled-down stake (principal + rewards) to the reserve.
 #[derive(Accounts)]
 pub struct SettleStake<'info> {
-    #[account(seeds = [POOL_SEED], bump = pool.bump)]
+    #[account(mut, seeds = [POOL_SEED], bump = pool.bump)]
     pub pool: Account<'info, Pool>,
     #[account(
+        mut,
         has_one = pool,
         has_one = vote_account,
         seeds = [VALIDATOR_SEED, pool.key().as_ref(), vote_account.key().as_ref()],
@@ -51,6 +52,7 @@ pub struct SettleStake<'info> {
 pub fn handle_settle_stake(ctx: Context<SettleStake>) -> Result<()> {
     let accounts = &ctx.accounts;
     let epoch = accounts.clock.epoch;
+    let vote_key = accounts.vote_account.key();
     let pool_key = accounts.pool.key();
     let reserve_seeds: &[&[u8]] = &[
         RESERVE_SEED,
@@ -98,10 +100,30 @@ pub fn handle_settle_stake(ctx: Context<SettleStake>) -> Result<()> {
     }
     require!(merged > 0 || returned > 0, StakittyError::NothingToSettle);
 
+    // Whatever came back above the basis still left in stake is reward, not principal.
+    let remaining = main
+        .lamports()
+        .checked_add(transient.lamports())
+        .ok_or(StakittyError::Overflow)?;
+    let entry = &mut ctx.accounts.validator_entry;
+    let new_basis = entry.stake_basis.min(remaining);
+    let principal_back = entry
+        .stake_basis
+        .checked_sub(new_basis)
+        .ok_or(StakittyError::Overflow)?;
+    let yield_back = returned.saturating_sub(principal_back);
+    entry.stake_basis = new_basis;
+    let pool = &mut ctx.accounts.pool;
+    pool.realized_yield = pool
+        .realized_yield
+        .checked_add(yield_back)
+        .ok_or(StakittyError::Overflow)?;
+
     emit!(StakeSettled {
-        vote_account: accounts.vote_account.key(),
+        vote_account: vote_key,
         merged_lamports: merged,
         returned_lamports: returned,
+        yield_lamports: yield_back,
         epoch,
     });
     Ok(())
@@ -112,5 +134,6 @@ pub struct StakeSettled {
     pub vote_account: Pubkey,
     pub merged_lamports: u64,
     pub returned_lamports: u64,
+    pub yield_lamports: u64,
     pub epoch: u64,
 }

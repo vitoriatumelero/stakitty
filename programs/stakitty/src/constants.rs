@@ -45,6 +45,24 @@ pub const MIN_RESERVE_BPS: u16 = 1_500;
 #[constant]
 pub const TICKET_SEED: &[u8] = b"ticket";
 
+#[constant]
+pub const ROUND_SEED: &[u8] = b"round";
+
+/// Protocol fee vault. Only the admin can withdraw from it.
+#[constant]
+pub const FEE_SEED: &[u8] = b"fee";
+
+/// Share of realized staking yield sent to the fee vault; the rest goes to prizes.
+#[constant]
+pub const PROTOCOL_FEE_BPS: u16 = 2_000;
+
+/// Epochs a winner has to claim before the prize returns to the prize pool (~4 weeks).
+#[constant]
+pub const PRIZE_CLAIM_EPOCHS: u64 = 14;
+
+/// Merkle proof depth bound: 2^24 leaves.
+pub const MAX_PROOF_LEN: usize = 24;
+
 pub const BPS_DENOMINATOR: u16 = 10_000;
 
 pub const VOTE_PROGRAM_ID: Pubkey = pubkey!("Vote111111111111111111111111111111111111111");

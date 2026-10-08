@@ -105,13 +105,18 @@ pub fn handle_close_season<'info>(ctx: Context<'info, CloseSeason<'info>>) -> Re
         StakittyError::SponsorshipMismatch
     );
 
+    // Freeze the weight window: the round's Merkle tree must sum to end - start.
+    let pool = &mut ctx.accounts.pool;
+    pool.accrue(clock.unix_timestamp)?;
+    season.end_ts = clock.unix_timestamp;
+    season.end_pool_weight = pool.cumulative_weight;
+
     season.weights = weights;
     season.reserve_bps = BPS_DENOMINATOR
         .checked_sub(sum_bps)
         .ok_or(StakittyError::Overflow)?;
     season.status = SeasonStatus::Closed;
 
-    let pool = &mut ctx.accounts.pool;
     pool.current_season = pool
         .current_season
         .checked_add(1)
@@ -125,6 +130,10 @@ pub fn handle_close_season<'info>(ctx: Context<'info, CloseSeason<'info>>) -> Re
         .epoch
         .checked_add(pool.season_length_epochs)
         .ok_or(StakittyError::Overflow)?;
+    next.start_ts = season.end_ts;
+    next.start_pool_weight = season.end_pool_weight;
+    next.end_ts = 0;
+    next.end_pool_weight = 0;
     next.total_paid = 0;
     next.sponsor_count = 0;
     next.status = SeasonStatus::Open;

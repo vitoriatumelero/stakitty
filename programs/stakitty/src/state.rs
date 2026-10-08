@@ -18,9 +18,16 @@ pub struct Pool {
     pub validator_count: u8,
     /// Lamports owed to open withdraw tickets; earmarked in the reserve, not spendable.
     pub pending_withdrawals: u64,
+    /// Staking rewards back in the reserve, waiting for `harvest_yield`. Not principal.
+    pub realized_yield: u64,
+    /// Prize vault lamports free for the next round (yield share + expired prizes).
+    pub prize_available: u64,
+    /// Prize vault lamports owed to drawn rounds not yet claimed or expired.
+    pub committed_prizes: u64,
     pub bump: u8,
     pub reserve_bump: u8,
     pub prize_bump: u8,
+    pub fee_bump: u8,
 }
 
 #[account]
@@ -55,6 +62,9 @@ pub struct ValidatorEntry {
     pub total_paid: u64,
     /// `season.index + 1` of the last season whose weights were applied; 0 = never.
     pub rebalanced_through: u32,
+    /// Reserve lamports currently sitting in this validator's stake + transient accounts.
+    /// Anything above it is staking reward, realized as yield when it comes back.
+    pub stake_basis: u64,
     pub stake_bump: u8,
     pub transient_bump: u8,
     pub bump: u8,
@@ -79,6 +89,12 @@ pub struct Season {
     pub index: u32,
     pub start_epoch: u64,
     pub end_epoch: u64,
+    /// Pool weight accumulator when the season opened and when it closed. Their difference
+    /// is the total the round's Merkle tree must sum to.
+    pub start_ts: i64,
+    pub start_pool_weight: u128,
+    pub end_ts: i64,
+    pub end_pool_weight: u128,
     /// Sponsor SOL paid in this season. It sets season+1 stake and funds season+1 prizes.
     pub total_paid: u64,
     pub sponsor_count: u8,
@@ -102,6 +118,34 @@ impl Season {
     }
 }
 
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Debug, InitSpace)]
+pub enum RoundStatus {
+    Committed,
+    RandomnessRequested,
+    Settled,
+    Paid,
+    Expired,
+}
+
+/// One draw per season, over the users' principal x seconds held during that season.
+#[account]
+#[derive(InitSpace)]
+pub struct Round {
+    pub pool: Pubkey,
+    pub season_index: u32,
+    /// Root over leaves `(owner, range_start, range_end)` tiling `[0, total_weight)`.
+    pub merkle_root: [u8; 32],
+    pub total_weight: u128,
+    pub leaf_count: u32,
+    pub prize: u64,
+    pub randomness: [u8; 32],
+    pub winning_ticket: u128,
+    pub winner: Pubkey,
+    pub status: RoundStatus,
+    pub settled_epoch: u64,
+    pub bump: u8,
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct SeasonSponsorship {
@@ -122,11 +166,23 @@ pub fn cumulative_at(cumulative: u128, balance: u64, last_ts: i64, now: i64) -> 
 }
 
 impl Pool {
-    /// Reserve lamports free for withdrawals and staking: minus the rent floor and open tickets.
+    /// Pool weight accumulator evaluated at `now` without mutating.
+    pub fn weight_at(&self, now: i64) -> Result<u128> {
+        cumulative_at(
+            self.cumulative_weight,
+            self.total_principal,
+            self.last_update_ts,
+            now,
+        )
+    }
+
+    /// Reserve lamports free for withdrawals and staking: minus the rent floor, open tickets
+    /// and yield not yet harvested.
     pub fn spendable(&self, reserve_lamports: u64, rent_floor: u64) -> u64 {
         reserve_lamports
             .saturating_sub(rent_floor)
             .saturating_sub(self.pending_withdrawals)
+            .saturating_sub(self.realized_yield)
     }
 
     pub fn accrue(&mut self, now: i64) -> Result<()> {

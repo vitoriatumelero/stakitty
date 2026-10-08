@@ -42,4 +42,24 @@ pub enum StakittyError {
     InvalidStakeAccount,
     #[msg("Season length must be at least one epoch")]
     InvalidSeasonLength,
+    #[msg("Round is not in the expected state")]
+    InvalidRoundState,
+    #[msg("Merkle total does not match the season's on-chain weight")]
+    WeightMismatch,
+    #[msg("Round has no weight to draw from")]
+    NoParticipants,
+    #[msg("Previous season account is required and must match")]
+    MissingPreviousSeason,
+    #[msg("Leaf does not contain the winning ticket")]
+    NotWinningLeaf,
+    #[msg("Merkle proof is invalid")]
+    InvalidProof,
+    #[msg("Prize claim window is still open")]
+    ClaimWindowOpen,
+    #[msg("Prize claim window has closed")]
+    ClaimWindowClosed,
+    #[msg("No realized yield to harvest")]
+    NothingToHarvest,
+    #[msg("Oracle queue is not the MagicBlock default queue")]
+    InvalidOracleQueue,
 }
