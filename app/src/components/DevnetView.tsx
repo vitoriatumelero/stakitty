@@ -75,7 +75,7 @@ export function DevnetView() {
             </button>
           </div>
         </div>
-        <Cat pose="standing" size={300} alt="Stakitty mascot" />
+        <Cat pose="idle" size={300} alt="Stakitty mascot" />
       </section>
 
       <div className="grid-3">

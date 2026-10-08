@@ -32,7 +32,7 @@ export function Validators({ state, dispatch }: { state: SimState; dispatch: Dis
             <dd>{MIN_VALIDATORS} sponsoring validators per season</dd>
           </div>
         </dl>
-        <Cat pose="point" size={120} />
+        <Cat pose="waving" size={170} />
       </div>
 
       <div className="window">

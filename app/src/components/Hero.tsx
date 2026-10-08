@@ -44,7 +44,7 @@ export function Hero({ state, dispatch }: { state: SimState; dispatch: Dispatch 
           <div className="prize-card">
             <div className="eyebrow light">Next prize</div>
             <div className="prize-amount">{sol(state.prizeVault)} SOL</div>
-            <Cat pose={won ? "happy" : "sleeping"} size={118} />
+            <Cat pose={won ? "jumping" : "napping"} size={124} />
           </div>
           <div className="mini-row">
             <span>Your deposit</span>

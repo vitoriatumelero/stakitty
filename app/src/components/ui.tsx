@@ -14,11 +14,21 @@ export function Badge({ tone = "mint", children }: { tone?: "mint" | "orange" | 
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
+// Animated poses are looping WebP from the brand guide (540×540 frames);
+// "pixel" stays a static PNG for the small header logo.
+const CAT_SRC: Record<CatPose, string> = {
+  pixel: "./cats/cat-pixel.png",
+  idle: "./cats/cat-idle.webp",
+  jumping: "./cats/cat-jumping.webp",
+  napping: "./cats/cat-napping.webp",
+  waving: "./cats/cat-waving.webp",
+};
+
 export function Cat({ pose, size, alt = "" }: { pose: CatPose; size: number; alt?: string }) {
-  return <img className="cat" src={`./cats/cat-${pose}.png`} alt={alt} style={{ height: size }} draggable={false} />;
+  return <img className="cat" src={CAT_SRC[pose]} alt={alt} style={{ height: size }} draggable={false} />;
 }
 
-export type CatPose = "standing" | "pixel" | "sleeping" | "waving" | "happy" | "point";
+export type CatPose = "pixel" | "idle" | "jumping" | "napping" | "waving";
 
 export function formatChance(p: number): string {
   if (p <= 0) return "—";
