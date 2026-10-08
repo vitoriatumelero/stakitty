@@ -11,7 +11,7 @@ export function LatestDraw({ state }: { state: SimState }) {
       </div>
       {!r ? (
         <div className="empty">
-          <Cat pose="sleeping" size={110} />
+          <Cat pose="napping" size={150} />
           <p className="muted">
             No draw yet. Deposit, advance an epoch so your balance counts, then run a draw from the demo console.
           </p>
