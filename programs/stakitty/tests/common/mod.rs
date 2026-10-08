@@ -9,18 +9,21 @@ use {
         },
         AccountDeserialize, InstructionData, ToAccountMetas,
     },
+    ephemeral_vrf_sdk::consts::{scoped_vrf_identity, DEFAULT_QUEUE, VRF_PROGRAM_ID},
     litesvm::LiteSVM,
     solana_keypair::Keypair,
     solana_message::{Message, VersionedMessage},
+    solana_signature::Signature,
     solana_signer::Signer,
     solana_stake_interface::stake_history::{StakeHistory, StakeHistoryEntry},
     solana_transaction::versioned::VersionedTransaction,
     stakitty::{
         error::StakittyError,
-        state::{Pool, Season, UserAccount, ValidatorEntry},
-        POOL_SEED, PRIZE_SEED, RESERVE_SEED, SEASON_SEED, SPONSORSHIP_SEED, STAKE_CONFIG_ID,
-        STAKE_HISTORY_ID, STAKE_PROGRAM_ID, STAKE_SEED, TICKET_SEED, TRANSIENT_SEED, USER_SEED,
-        VALIDATOR_SEED, VOTE_PROGRAM_ID,
+        merkle,
+        state::{Pool, Round, Season, UserAccount, ValidatorEntry},
+        FEE_SEED, POOL_SEED, PRIZE_SEED, RESERVE_SEED, ROUND_SEED, SEASON_SEED, SPONSORSHIP_SEED,
+        STAKE_CONFIG_ID, STAKE_HISTORY_ID, STAKE_PROGRAM_ID, STAKE_SEED, TICKET_SEED,
+        TRANSIENT_SEED, USER_SEED, VALIDATOR_SEED, VOTE_PROGRAM_ID,
     },
 };
 
@@ -39,6 +42,7 @@ pub struct Env {
     pub pool: Pubkey,
     pub reserve: Pubkey,
     pub prize_vault: Pubkey,
+    pub fee_vault: Pubkey,
 }
 
 pub struct Validator {
@@ -84,8 +88,36 @@ pub fn season_pda(pool: &Pubkey, index: u32) -> Pubkey {
 }
 
 pub fn setup() -> Env {
+    setup_with(LiteSVM::new())
+}
+
+/// Same pool, plus MagicBlock's VRF program and oracle queue copied from devnet, with
+/// sigverify off so a test can act as the VRF identity PDA in `consume_randomness`.
+pub fn setup_vrf() -> Env {
+    let mut svm = LiteSVM::new().with_sigverify(false);
+    svm.add_program(
+        VRF_PROGRAM_ID,
+        include_bytes!("../fixtures/ephemeral_vrf.so"),
+    )
+    .unwrap();
+    let queue = include_bytes!("../fixtures/oracle_queue.bin").to_vec();
+    let lamports = svm.minimum_balance_for_rent_exemption(queue.len());
+    svm.set_account(
+        DEFAULT_QUEUE,
+        solana_account::Account {
+            lamports,
+            data: queue,
+            owner: VRF_PROGRAM_ID,
+            executable: false,
+            rent_epoch: 0,
+        },
+    )
+    .unwrap();
+    setup_with(svm)
+}
+
+fn setup_with(mut svm: LiteSVM) -> Env {
     let program_id = stakitty::id();
-    let mut svm = LiteSVM::new();
     let bytes = include_bytes!(concat!(
         env!("CARGO_TARGET_TMPDIR"),
         "/../deploy/stakitty.so"
@@ -97,6 +129,7 @@ pub fn setup() -> Env {
     let pool = Pubkey::find_program_address(&[POOL_SEED], &program_id).0;
     let reserve = Pubkey::find_program_address(&[RESERVE_SEED, pool.as_ref()], &program_id).0;
     let prize_vault = Pubkey::find_program_address(&[PRIZE_SEED, pool.as_ref()], &program_id).0;
+    let fee_vault = Pubkey::find_program_address(&[FEE_SEED, pool.as_ref()], &program_id).0;
 
     let ix = Instruction::new_with_bytes(
         program_id,
@@ -110,6 +143,7 @@ pub fn setup() -> Env {
             pool,
             reserve,
             prize_vault,
+            fee_vault,
             first_season: season_pda(&pool, 0),
             system_program: system_program::ID,
         }
@@ -122,6 +156,7 @@ pub fn setup() -> Env {
         pool,
         reserve,
         prize_vault,
+        fee_vault,
     }
 }
 
@@ -538,4 +573,276 @@ pub fn claim_withdraw(env: &mut Env, user: &Keypair) -> Result<(), String> {
     let ix = claim_withdraw_ix(env, &user.pubkey(), ticket_pda(env, &user.pubkey()));
     let admin = env.admin.insecure_clone();
     send(&mut env.svm, ix, &admin, &[&admin, user])
+}
+
+pub fn round_pda(pool: &Pubkey, season: u32) -> Pubkey {
+    Pubkey::find_program_address(
+        &[ROUND_SEED, pool.as_ref(), &season.to_le_bytes()],
+        &stakitty::id(),
+    )
+    .0
+}
+
+pub fn round_state(env: &Env, season: u32) -> Round {
+    let acc = env.svm.get_account(&round_pda(&env.pool, season)).unwrap();
+    Round::try_deserialize(&mut acc.data.as_slice()).unwrap()
+}
+
+/// Merkle tree over `(owner, weight)` leaves, laid out as contiguous ticket ranges.
+pub struct Tree {
+    pub leaves: Vec<(Pubkey, u128, u128)>,
+    layers: Vec<Vec<[u8; 32]>>,
+}
+
+impl Tree {
+    pub fn new(weights: &[(Pubkey, u128)]) -> Self {
+        let mut start = 0u128;
+        let leaves: Vec<(Pubkey, u128, u128)> = weights
+            .iter()
+            .map(|(owner, w)| {
+                let leaf = (*owner, start, start + w);
+                start += w;
+                leaf
+            })
+            .collect();
+        let mut layers = vec![leaves
+            .iter()
+            .map(|(o, a, b)| merkle::leaf_hash(o, *a, *b))
+            .collect::<Vec<_>>()];
+        while layers.last().unwrap().len() > 1 {
+            let next = layers
+                .last()
+                .unwrap()
+                .chunks(2)
+                .map(|pair| {
+                    if pair.len() == 2 {
+                        merkle::node_hash(&pair[0], &pair[1])
+                    } else {
+                        pair[0]
+                    }
+                })
+                .collect();
+            layers.push(next);
+        }
+        Tree { leaves, layers }
+    }
+
+    pub fn root(&self) -> [u8; 32] {
+        self.layers.last().unwrap()[0]
+    }
+
+    pub fn total(&self) -> u128 {
+        self.leaves.last().map_or(0, |l| l.2)
+    }
+
+    /// Siblings bottom-up; a promoted odd node contributes no sibling at that level.
+    pub fn proof(&self, mut index: usize) -> Vec<[u8; 32]> {
+        let mut proof = Vec::new();
+        for layer in &self.layers[..self.layers.len() - 1] {
+            let sibling = index ^ 1;
+            if sibling < layer.len() {
+                proof.push(layer[sibling]);
+            }
+            index /= 2;
+        }
+        proof
+    }
+}
+
+pub fn commit_round_ix(
+    env: &Env,
+    authority: &Pubkey,
+    season: u32,
+    root: [u8; 32],
+    total_weight: u128,
+    leaf_count: u32,
+    with_previous: bool,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        stakitty::id(),
+        &stakitty::instruction::CommitRound {
+            merkle_root: root,
+            total_weight,
+            leaf_count,
+        }
+        .data(),
+        stakitty::accounts::CommitRound {
+            authority: *authority,
+            pool: env.pool,
+            season: season_pda(&env.pool, season),
+            previous_season: with_previous.then(|| season_pda(&env.pool, season.saturating_sub(1))),
+            round: round_pda(&env.pool, season),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    )
+}
+
+pub fn commit_round(env: &mut Env, season: u32, tree: &Tree) -> Result<(), String> {
+    let admin = env.admin.insecure_clone();
+    let ix = commit_round_ix(
+        env,
+        &admin.pubkey(),
+        season,
+        tree.root(),
+        tree.total(),
+        tree.leaves.len() as u32,
+        season > 0,
+    );
+    send(&mut env.svm, ix, &admin, &[&admin])
+}
+
+pub fn request_draw(env: &mut Env, season: u32) -> Result<(), String> {
+    let admin = env.admin.insecure_clone();
+    let ix = Instruction::new_with_bytes(
+        stakitty::id(),
+        &stakitty::instruction::RequestDraw {}.data(),
+        stakitty::accounts::RequestDraw {
+            payer: admin.pubkey(),
+            pool: env.pool,
+            round: round_pda(&env.pool, season),
+            oracle_queue: DEFAULT_QUEUE,
+            program_identity: Pubkey::find_program_address(&[b"identity"], &stakitty::id()).0,
+            vrf_program: VRF_PROGRAM_ID,
+            slot_hashes: anchor_lang::prelude::pubkey!(
+                "SysvarS1otHashes111111111111111111111111111"
+            ),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+    send(&mut env.svm, ix, &admin, &[&admin])
+}
+
+/// Sends `consume_randomness` claiming `identity` as signer. Needs `setup_vrf` (sigverify off):
+/// a real transaction can only carry that signature via the VRF program's CPI.
+pub fn consume_randomness_as(
+    env: &mut Env,
+    identity: Pubkey,
+    season: u32,
+    randomness: [u8; 32],
+) -> Result<(), String> {
+    let ix = Instruction::new_with_bytes(
+        stakitty::id(),
+        &stakitty::instruction::ConsumeRandomness { randomness }.data(),
+        stakitty::accounts::ConsumeRandomness {
+            vrf_program_identity: identity,
+            round: round_pda(&env.pool, season),
+        }
+        .to_account_metas(None),
+    );
+    let msg = Message::new_with_blockhash(
+        &[ix],
+        Some(&env.admin.pubkey()),
+        &env.svm.latest_blockhash(),
+    );
+    let signers = usize::from(msg.header.num_required_signatures);
+    let tx = VersionedTransaction {
+        signatures: vec![Signature::default(); signers],
+        message: VersionedMessage::Legacy(msg),
+    };
+    let res = env
+        .svm
+        .send_transaction(tx)
+        .map(|_| ())
+        .map_err(|e| format!("{:?}\n{}", e.err, e.meta.logs.join("\n")));
+    env.svm.expire_blockhash();
+    res
+}
+
+pub fn vrf_identity() -> Pubkey {
+    scoped_vrf_identity(&stakitty::id())
+}
+
+/// Randomness whose low 16 bytes decode to `ticket` (assuming `ticket < total_weight`).
+pub fn randomness_for(ticket: u128) -> [u8; 32] {
+    let mut r = [0u8; 32];
+    r[..16].copy_from_slice(&ticket.to_le_bytes());
+    r
+}
+
+pub fn claim_prize_ix(
+    env: &Env,
+    winner: &Pubkey,
+    season: u32,
+    start: u128,
+    end: u128,
+    proof: Vec<[u8; 32]>,
+) -> Instruction {
+    Instruction::new_with_bytes(
+        stakitty::id(),
+        &stakitty::instruction::ClaimPrize {
+            range_start: start,
+            range_end: end,
+            proof,
+        }
+        .data(),
+        stakitty::accounts::ClaimPrize {
+            winner: *winner,
+            pool: env.pool,
+            prize_vault: env.prize_vault,
+            round: round_pda(&env.pool, season),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    )
+}
+
+/// Claims with leaf `index` of `tree`, signed by `user`. Admin pays fees.
+pub fn claim_prize(
+    env: &mut Env,
+    user: &Keypair,
+    season: u32,
+    tree: &Tree,
+    index: usize,
+) -> Result<(), String> {
+    let (_, start, end) = tree.leaves[index];
+    let ix = claim_prize_ix(env, &user.pubkey(), season, start, end, tree.proof(index));
+    let admin = env.admin.insecure_clone();
+    send(&mut env.svm, ix, &admin, &[&admin, user])
+}
+
+pub fn expire_prize(env: &mut Env, season: u32) -> Result<(), String> {
+    let ix = Instruction::new_with_bytes(
+        stakitty::id(),
+        &stakitty::instruction::ExpirePrize {}.data(),
+        stakitty::accounts::ExpirePrize {
+            pool: env.pool,
+            round: round_pda(&env.pool, season),
+        }
+        .to_account_metas(None),
+    );
+    let admin = env.admin.insecure_clone();
+    send(&mut env.svm, ix, &admin, &[&admin])
+}
+
+pub fn harvest_yield(env: &mut Env) -> Result<(), String> {
+    let ix = Instruction::new_with_bytes(
+        stakitty::id(),
+        &stakitty::instruction::HarvestYield {}.data(),
+        stakitty::accounts::HarvestYield {
+            pool: env.pool,
+            reserve: env.reserve,
+            prize_vault: env.prize_vault,
+            fee_vault: env.fee_vault,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    );
+    let admin = env.admin.insecure_clone();
+    send(&mut env.svm, ix, &admin, &[&admin])
+}
+
+pub fn withdraw_fees_ix(env: &Env, authority: &Pubkey, amount: u64) -> Instruction {
+    Instruction::new_with_bytes(
+        stakitty::id(),
+        &stakitty::instruction::WithdrawFees { amount }.data(),
+        stakitty::accounts::WithdrawFees {
+            authority: *authority,
+            pool: env.pool,
+            fee_vault: env.fee_vault,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None),
+    )
 }

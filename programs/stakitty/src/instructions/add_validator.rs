@@ -55,6 +55,7 @@ pub fn handle_add_validator(ctx: Context<AddValidator>) -> Result<()> {
     entry.vote_account = vote_key;
     entry.total_paid = 0;
     entry.rebalanced_through = 0;
+    entry.stake_basis = 0;
     entry.stake_bump = stake_bump;
     entry.transient_bump = transient_bump;
     entry.bump = ctx.bumps.validator_entry;
