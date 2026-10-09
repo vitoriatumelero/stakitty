@@ -49,6 +49,32 @@ export async function getRecentSignatures(address: string, limit = 12): Promise<
   return rpc<SigInfo[]>("getSignaturesForAddress", [address, { limit }]);
 }
 
-export async function getEpoch(): Promise<{ epoch: number; slotIndex: number; slotsInEpoch: number }> {
-  return rpc("getEpochInfo", [{ commitment: "confirmed" }]);
+export interface EpochInfo {
+  epoch: number;
+  slotIndex: number;
+  slotsInEpoch: number;
+  secondsPerSlot: number;
+}
+
+// Nominal slot time, used only when the cluster returns no performance samples.
+const NOMINAL_SECONDS_PER_SLOT = 0.4;
+
+interface PerfSample {
+  numSlots: number;
+  samplePeriodSecs: number;
+}
+
+/** Average seconds per slot over the cluster's recent performance samples (one per minute). */
+export function secondsPerSlot(samples: PerfSample[]): number {
+  const slots = samples.reduce((sum, s) => sum + s.numSlots, 0);
+  const secs = samples.reduce((sum, s) => sum + s.samplePeriodSecs, 0);
+  return slots > 0 && secs > 0 ? secs / slots : NOMINAL_SECONDS_PER_SLOT;
+}
+
+export async function getEpoch(): Promise<EpochInfo> {
+  const [info, samples] = await Promise.all([
+    rpc<Omit<EpochInfo, "secondsPerSlot">>("getEpochInfo", [{ commitment: "confirmed" }]),
+    rpc<PerfSample[]>("getRecentPerformanceSamples", [30]).catch(() => []),
+  ]);
+  return { ...info, secondsPerSlot: secondsPerSlot(samples) };
 }
