@@ -2,10 +2,16 @@
 // Enough to show the connected address and devnet balance. For signing program
 // instructions, the dev can swap this for @solana/wallet-adapter-react.
 
+interface Key {
+  toString(): string;
+}
+
 interface InjectedProvider {
   isPhantom?: boolean;
-  publicKey?: { toString(): string } | null;
-  connect: (opts?: { onlyIfTrusted?: boolean }) => Promise<{ publicKey: { toString(): string } }>;
+  publicKey?: Key | null;
+  // Phantom resolves `{ publicKey }`; Solflare resolves `true`; others resolve nothing
+  // and only set `provider.publicKey`.
+  connect: (opts?: { onlyIfTrusted?: boolean }) => Promise<unknown>;
   disconnect: () => Promise<void>;
 }
 
@@ -27,11 +33,19 @@ export function findProvider(): { name: string; provider: InjectedProvider } | n
   return null;
 }
 
+/** The connected address, whichever way the wallet reports it. */
+export function connectedAddress(result: unknown, provider: Pick<InjectedProvider, "publicKey">): string | null {
+  const fromResult = (result as { publicKey?: Key | null } | null | undefined)?.publicKey;
+  const key = fromResult ?? provider.publicKey;
+  return key ? key.toString() : null;
+}
+
 export async function connectWallet(): Promise<string> {
   const found = findProvider();
   if (!found) throw new Error("No Solana wallet found. Install Phantom or Solflare and switch it to Devnet.");
-  const { publicKey } = await found.provider.connect();
-  return publicKey.toString();
+  const address = connectedAddress(await found.provider.connect(), found.provider);
+  if (!address) throw new Error(`${found.name} connected but did not share an address. Unlock it and try again.`);
+  return address;
 }
 
 export async function disconnectWallet(): Promise<void> {
