@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { explorer, getBalance, getEpoch, getProgramInfo, getRecentSignatures, PROGRAM_ID, RPC_URL, SigInfo } from "../devnet/rpc";
+import {
+  EpochInfo,
+  explorer,
+  getBalance,
+  getEpoch,
+  getProgramInfo,
+  getRecentSignatures,
+  PROGRAM_ID,
+  RPC_URL,
+  SigInfo,
+} from "../devnet/rpc";
 import { connectWallet, disconnectWallet, findProvider } from "../devnet/wallet";
 import { short } from "../sim/engine";
 import { Badge, Cat, Eyebrow, sol } from "./ui";
@@ -9,7 +19,7 @@ type Load<T> = { status: "idle" | "loading" | "ok" | "error"; data?: T; error?: 
 export function DevnetView() {
   const [program, setProgram] = useState<Load<{ exists: boolean; executable: boolean }>>({ status: "idle" });
   const [sigs, setSigs] = useState<Load<SigInfo[]>>({ status: "idle" });
-  const [epoch, setEpoch] = useState<Load<{ epoch: number; slotIndex: number; slotsInEpoch: number }>>({ status: "idle" });
+  const [epoch, setEpoch] = useState<Load<EpochInfo>>({ status: "idle" });
   const [wallet, setWallet] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
@@ -51,8 +61,9 @@ export function DevnetView() {
   };
 
   const progress = epoch.data ? epoch.data.slotIndex / epoch.data.slotsInEpoch : 0;
-  // ~400ms per slot
-  const hoursLeft = epoch.data ? ((epoch.data.slotsInEpoch - epoch.data.slotIndex) * 0.4) / 3600 : 0;
+  const hoursLeft = epoch.data
+    ? ((epoch.data.slotsInEpoch - epoch.data.slotIndex) * epoch.data.secondsPerSlot) / 3600
+    : 0;
 
   return (
     <div className="devnet">
