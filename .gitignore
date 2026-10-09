@@ -9,4 +9,4 @@ test-ledger
 rounds/
 .env
 .env.*
-.stakitty-run/
+.stakitty-run*/
