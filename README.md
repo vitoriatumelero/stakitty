@@ -109,21 +109,33 @@ The demo runs deposit → sponsor → close_season → rebalance → stake activ
   signs the callback with the same scoped identity PDA. It is never deployed. On devnet the
   real VRF answers.
 
-## Devnet run (one crank per epoch boundary)
+## Live on devnet
 
-```bash
-RPC_URL=https://api.devnet.solana.com WALLET=~/.config/solana/id.json POOL_ID=1 npm run cluster-run -- setup
-RPC_URL=... WALLET=... POOL_ID=1 npm run cluster-run -- advance   # after each boundary (~28 h)
-```
+- **Program:** [`8dFfRCbNDeYt9y96ZC8uCcU2BbXt2LwWEH91ZUN3BRQg`](https://explorer.solana.com/address/8dFfRCbNDeYt9y96ZC8uCcU2BbXt2LwWEH91ZUN3BRQg?cluster=devnet)
+- **App:** https://vitoriatumelero.github.io/stakitty/ (toggle **Devnet live** to see every on-chain step)
+- **Pool 1:** 4 test validators, 2 depositors (alice, bob), 4.95 SOL principal, 1-epoch seasons.
 
-`advance` is idempotent: it closes seasons, pays sponsors, settles, rebalances, harvests, and
-commits, draws and claims round 1. It prints explorer links for every transaction.
-- Demo keypairs are kept in `.stakitty-run/`, which is gitignored and holds throwaway test
-  keys only.
-- It refuses mainnet URLs.
-- To check it locally: add `MOCK_VRF=1 SEASON_EPOCHS=3 AMOUNT_SCALE=20` against the local
-  validator. The scale is there because the minimum delegation is 1 SOL locally and
-  1 lamport on devnet.
+| Step | Transaction |
+|---|---|
+| Program upgrade | <link> |
+| `initialize_pool` | <link> |
+| Validators A–D listed | <links> |
+| Deposits | <links> |
+| Season 0 sponsorships | <links> |
+| `close_season 0` + `rebalance` | <links> (epoch 1179) |
+| First VRF draw + `claim_prize` | <links> (epoch 1180) |
+
+### Running it yourself
+
+    RPC_URL=<devnet rpc> WALLET=~/.config/solana/id.json POOL_ID=1 npm run cluster-run -- setup
+    RPC_URL=<devnet rpc> WALLET=... POOL_ID=1 npm run cluster-run -- advance   # after each epoch boundary (~28 h)
+
+- `advance` is idempotent: it closes seasons, pays sponsors, settles, rebalances, harvests,
+  and commits, draws and claims round 1.
+- Devnet's minimum stake delegation is **1 SOL**. Each validator's target, after the 15% reserve,
+  must clear rent + 1 SOL or the rebalance leaves it liquid. Pool 1 deposits ~4.95 SOL for that reason.
+- The public devnet RPC rate-limits uploads and cranks. Use a dedicated devnet RPC.
+- Demo keypairs live in `.stakitty-run/` (gitignored, throwaway). The script refuses mainnet URLs.
 
 ## End-to-end on Surfpool
 
